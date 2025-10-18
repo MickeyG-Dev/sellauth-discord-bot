@@ -45,7 +45,8 @@ export default {
     try {
       // TODO: Implement server-side pagination for the next update.
 
-      let coupons = (await api.get(`shops/${shopId}/coupons`)) || [];
+      let couponsData = await api.get(`shops/${shopId}/coupons`);
+      let coupons = Array.isArray(couponsData) ? couponsData : (couponsData?.data || []);
 
       const totalPages = Math.ceil(coupons.length / pageSize);
       const startIndex = (page - 1) * pageSize;
