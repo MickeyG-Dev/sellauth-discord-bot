@@ -1,10 +1,15 @@
 import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
 import { bot } from '../index.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 export default {
   data: new SlashCommandBuilder().setName('help').setDescription('List of available commands'),
   async execute(interaction) {
     let commands = bot.slashCommandsMap;
+
+    await logCommandUsage(interaction, 'help', {
+      result: `Displayed help menu with ${commands.size} commands`
+    });
 
     let helpEmbed = new EmbedBuilder()
       .setTitle('Help')

@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -22,9 +23,17 @@ export default {
       const coupon = coupons.find((coupon) => coupon.code === code);
 
       if (!coupon) {
+        await logCommandUsage(interaction, 'coupon-view', {
+          error: `Coupon not found: ${code}`
+        });
+        
         await interaction.reply({ content: `No coupon found with the code: ${code}`, ephemeral: true });
         return;
       }
+
+      await logCommandUsage(interaction, 'coupon-view', {
+        result: `Viewed coupon "${code}" - ${coupon.type === 'percentage' ? `${coupon.discount}%` : `$${coupon.discount}`}, Uses: ${coupon.uses}/${coupon.max_uses || '∞'}`
+      });
 
       // Create an embed for the single coupon
       const embed = new EmbedBuilder()
@@ -51,6 +60,10 @@ export default {
 
       await interaction.reply({ embeds: [embed] });
     } catch (error) {
+      await logCommandUsage(interaction, 'coupon-view', {
+        error: `Failed to view coupon "${code}": ${error.message}`
+      });
+      
       console.error('Error viewing coupon:', error);
       await interaction.reply({ content: 'Failed to view coupon.', ephemeral: true });
     }

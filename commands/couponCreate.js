@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -58,6 +59,10 @@ export default {
     try {
       await api.post(`shops/${api.shopId}/coupons`, couponData);
 
+      await logCommandUsage(interaction, 'coupon-create', {
+        result: `Coupon "${code}" created - ${discount} (${type}), Global: ${global}, Max Uses: ${maxUses}`
+      });
+
       const embed = new EmbedBuilder()
         .setTitle('Coupon Created')
         .setDescription(`Coupon \`${code}\` has been successfully created.`)
@@ -71,6 +76,10 @@ export default {
 
       return interaction.reply({ embeds: [embed] });
     } catch (error) {
+      await logCommandUsage(interaction, 'coupon-create', {
+        error: `Failed to create coupon "${code}": ${error.message}`
+      });
+      
       console.error(error);
       return interaction.reply({ content: 'There was an error creating the coupon.', ephemeral: true });
     }

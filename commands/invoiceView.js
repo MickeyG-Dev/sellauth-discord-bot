@@ -1,5 +1,6 @@
 import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
 import { formatPrice } from '../utils/formatPrice.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 const formatCoupon = (coupon) => {
   if (!coupon) return 'N/A';
@@ -70,9 +71,17 @@ export default {
       let invoice = await api.get(`shops/${shopId}/invoices/${invoiceId}`);
 
       if (!invoice) {
+        await logCommandUsage(interaction, 'invoice-view', {
+          error: `Invoice not found: ${id}`
+        });
+        
         await interaction.reply({ content: `No invoice found with the id: ${id}`, ephemeral: true });
         return;
       }
+
+      await logCommandUsage(interaction, 'invoice-view', {
+        result: `Viewed invoice ${id} - Status: ${invoice.status}, Product: ${invoice.product?.name || 'N/A'}`
+      });
 
       const embed = new EmbedBuilder()
         .setTitle('Invoice Details')
@@ -101,6 +110,10 @@ export default {
 
       await interaction.reply({ embeds: [embed] });
     } catch (error) {
+      await logCommandUsage(interaction, 'invoice-view', {
+        error: `Failed to view invoice ${id}: ${error.message}`
+      });
+      
       console.error('Error viewing invoice:', error);
       await interaction.reply({ content: 'Failed to view invoice.', ephemeral: true });
     }

@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 const formatCoupon = (coupon, isSingle) => {
   const { code, type, discount, expiration_date, uses, max_uses, products } = coupon;
@@ -47,6 +48,10 @@ export default {
 
       let couponsData = await api.get(`shops/${shopId}/coupons`);
       let coupons = Array.isArray(couponsData) ? couponsData : (couponsData?.data || []);
+
+      await logCommandUsage(interaction, 'coupon-list', {
+        result: `Listed ${coupons.length} coupons`
+      });
 
       const totalPages = Math.ceil(coupons.length / pageSize);
       const startIndex = (page - 1) * pageSize;
@@ -123,6 +128,10 @@ export default {
         });
       }
     } catch (error) {
+      await logCommandUsage(interaction, 'coupon-list', {
+        error: `Failed to list coupons: ${error.message}`
+      });
+      
       console.error('Error listing coupons:', error);
       await interaction.reply({ content: 'Failed to list coupons.', ephemeral: true });
     }

@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 // emoji for status colors
 const COLOR_EMOJIS = {
@@ -50,6 +51,11 @@ export default {
       });
 
       const colorEmoji = COLOR_EMOJIS[statusColor] || '⚪';
+      
+      await logCommandUsage(interaction, 'product-status', {
+        result: `Product ${productId} status updated to "${statusText}" ${colorEmoji}`
+      });
+      
       const embed = new EmbedBuilder()
         .setTitle('Product Status Updated')
         .setDescription(`Status updated for product: ${productId}`)
@@ -67,6 +73,10 @@ export default {
 
       if (error.message == 'Invalid response') {
         if (error.response.status === 500) {
+          await logCommandUsage(interaction, 'product-status', {
+            error: `Product not found: ${productId}`
+          });
+          
           return interaction.reply({ 
             content: 'Failed to update product status. Product not found.',
             ephemeral: true 
@@ -74,10 +84,14 @@ export default {
         }
       }
 
+      await logCommandUsage(interaction, 'product-status', {
+        error: `Failed to update product ${productId}: ${error.message}`
+      });
+
       return interaction.reply({ 
         content: 'Failed to update product status. Error: ' + error.message,
         ephemeral: true 
       });
     }
   }
-}; 
+};

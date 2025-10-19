@@ -2,6 +2,7 @@ import { SlashCommandBuilder } from 'discord.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { config } from '../utils/config.js';
+import { logCommandUsage } from '../utils/webhookLogger.js';
 
 // Initialize claims data storage
 const claimsFilePath = join(process.cwd(), 'claims.json');
@@ -38,6 +39,10 @@ export default {
 
     // Check if already claimed
     if (claimsData[invoiceId]) {
+      await logCommandUsage(interaction, 'claim', {
+        error: `Invoice ${invoiceId} already claimed`
+      });
+      
       await interaction.reply({ 
         content: `Customer role has already been claimed via invoice ${invoiceId}.`, 
         ephemeral: true 
@@ -50,6 +55,10 @@ export default {
 
       // Verify email matches
       if (invoiceData.email !== userEmail) {
+        await logCommandUsage(interaction, 'claim', {
+          error: `Email mismatch for invoice ${invoiceId}`
+        });
+        
         await interaction.reply({ 
           content: 'The provided email does not match the invoice\'s email.', 
           ephemeral: true 
@@ -71,17 +80,29 @@ export default {
         claimsData[invoiceId] = interaction.user.id;
         writeFileSync(claimsFilePath, JSON.stringify(claimsData, null, 2));
 
+        await logCommandUsage(interaction, 'claim', {
+          result: `Customer role claimed successfully via invoice ${invoiceId} by ${interaction.user.tag}`
+        });
+
         await interaction.reply({ 
           content: `Customer role claimed successfully via invoice ${invoiceId}!`, 
           ephemeral: true 
         });
       } else {
+        await logCommandUsage(interaction, 'claim', {
+          error: `Invoice ${invoiceId} not paid yet`
+        });
+        
         await interaction.reply({ 
           content: `Invoice ${invoiceId} has not been paid yet.`, 
           ephemeral: true 
         });
       }
     } catch (error) {
+      await logCommandUsage(interaction, 'claim', {
+        error: `Failed to process claim for invoice ${invoiceId}: ${error.message}`
+      });
+      
       console.error('Error claiming role:', error);
       await interaction.reply({ 
         content: 'An error occurred while processing your request.', 
