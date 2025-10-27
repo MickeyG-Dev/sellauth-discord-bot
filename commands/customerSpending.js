@@ -189,8 +189,8 @@ export default {
           { name: 'Total Spent', value: currencyBreakdown.trim() || 'No purchases' }
         ]);
 
-      // Fetch detailed invoice data for recent purchases to get product names
-      const recentInvoiceIds = completedInvoices
+      // Get recent purchases and try to fetch details
+      const recentInvoices = completedInvoices
         .sort((a, b) => {
           const dateA = new Date(a.completed_at || a.created_at);
           const dateB = new Date(b.completed_at || b.created_at);
@@ -203,31 +203,63 @@ export default {
         ephemeral: true 
       }).catch(() => {});
 
-      if (recentInvoiceIds.length > 0) {
+      if (recentInvoices.length > 0) {
         const recentPurchasesStr = [];
         
-        for (const inv of recentInvoiceIds) {
+        // Debug: Log the structure of the first invoice
+        if (recentInvoices[0]) {
+          console.log('First invoice structure:', JSON.stringify({
+            id: recentInvoices[0].id,
+            unique_id: recentInvoices[0].unique_id,
+            invoice_id: recentInvoices[0].invoice_id,
+            product: recentInvoices[0].product,
+            product_id: recentInvoices[0].product_id,
+            product_name: recentInvoices[0].product_name
+          }));
+        }
+        
+        for (const inv of recentInvoices) {
           try {
-            // Extract invoice ID - handle both formats
-            let invoiceId = inv.id;
-            if (inv.unique_id && inv.unique_id.includes('-')) {
-              invoiceId = Number(inv.unique_id.split('-')[1]);
+            // Try multiple methods to get the invoice ID
+            let invoiceId = null;
+            
+            // Method 1: Check if unique_id exists and extract number
+            if (inv.unique_id && typeof inv.unique_id === 'string' && inv.unique_id.includes('-')) {
+              invoiceId = inv.unique_id.split('-')[1];
+            }
+            // Method 2: Use id directly
+            else if (inv.id) {
+              invoiceId = inv.id;
+            }
+            // Method 3: Use invoice_id if it exists
+            else if (inv.invoice_id) {
+              invoiceId = inv.invoice_id;
             }
             
-            // Fetch full invoice details to get product info
+            console.log(`Attempting to fetch invoice with ID: ${invoiceId}`);
+            
+            if (!invoiceId) {
+              throw new Error('No valid invoice ID found');
+            }
+            
+            // Fetch full invoice details
             const fullInvoice = await api.get(`shops/${shopId}/invoices/${invoiceId}`);
             
             const date = new Date(fullInvoice.completed_at || fullInvoice.created_at);
-            const product = fullInvoice.product?.name || fullInvoice.product?.title || 'Unknown Product';
+            const product = fullInvoice.product?.name || fullInvoice.product?.title || fullInvoice.product_name || 'Unknown Product';
             const price = formatPrice(fullInvoice.price, fullInvoice.currency || 'USD');
             
             recentPurchasesStr.push(`• ${product} - ${price} (${date.toLocaleDateString()})`);
+            console.log(`Successfully fetched product: ${product}`);
           } catch (error) {
-            console.error('Error fetching invoice details:', error);
-            // Fallback to basic info if fetch fails
+            console.error(`Error fetching invoice details for invoice:`, error.message);
+            console.error('Invoice object:', JSON.stringify(inv));
+            
+            // Fallback: Use whatever product info is available in the list
             const date = new Date(inv.completed_at || inv.created_at);
+            const product = inv.product?.name || inv.product?.title || inv.product_name || 'Product unavailable';
             const price = formatPrice(inv.price, inv.currency || 'USD');
-            recentPurchasesStr.push(`• [Details unavailable] - ${price} (${date.toLocaleDateString()})`);
+            recentPurchasesStr.push(`• ${product} - ${price} (${date.toLocaleDateString()})`);
           }
         }
 
@@ -235,7 +267,7 @@ export default {
           embed.addFields({ name: 'Recent Purchases', value: recentPurchasesStr.join('\n') });
         }
 
-        // Build product list for logging (first 3)
+        // Build product list for logging
         const productsSummary = recentPurchasesStr
           .slice(0, 3)
           .map(str => str.split(' - ')[0].replace('• ', ''))
