@@ -22,41 +22,54 @@ export default {
     await interaction.deferReply();
 
     try {
-      // Fetch invoices from API
-      const response = await api.get(`shops/${shopId}/invoices`);
-      
-      // Handle different response formats
-      let invoicesList;
-      
-      if (Array.isArray(response)) {
-        invoicesList = response;
-      } else if (response?.data && Array.isArray(response.data)) {
-        invoicesList = response.data;
-      } else if (response?.invoices && Array.isArray(response.invoices)) {
-        invoicesList = response.invoices;
-      } else {
-        console.log('Unexpected response format:', JSON.stringify(response).substring(0, 500));
-        
-        await interaction.editReply({
-          content: 'Unable to parse invoice data. The API response format is unexpected.\nPlease check the bot console for more details.',
-          ephemeral: true
-        });
-        return;
+      // Fetch ALL invoices with pagination
+      let allInvoices = [];
+      let currentPage = 1;
+      let hasMorePages = true;
+      const maxPages = 50; // Safety limit to prevent infinite loops
+
+      console.log('Starting to fetch invoices...');
+
+      while (hasMorePages && currentPage <= maxPages) {
+        try {
+          // Try fetching with page parameter
+          const response = await api.get(`shops/${shopId}/invoices?page=${currentPage}`);
+          
+          let invoicesList;
+          
+          if (Array.isArray(response)) {
+            invoicesList = response;
+          } else if (response?.data && Array.isArray(response.data)) {
+            invoicesList = response.data;
+          } else if (response?.invoices && Array.isArray(response.invoices)) {
+            invoicesList = response.invoices;
+          } else {
+            console.log('Unexpected response format on page', currentPage);
+            break;
+          }
+
+          if (invoicesList.length === 0) {
+            hasMorePages = false;
+          } else {
+            allInvoices = allInvoices.concat(invoicesList);
+            console.log(`Fetched page ${currentPage}: ${invoicesList.length} invoices (Total: ${allInvoices.length})`);
+            
+            // If we got less than a full page (usually 20), we're probably on the last page
+            if (invoicesList.length < 20) {
+              hasMorePages = false;
+            } else {
+              currentPage++;
+            }
+          }
+        } catch (error) {
+          console.log(`Error fetching page ${currentPage}:`, error.message);
+          hasMorePages = false;
+        }
       }
 
-      console.log(`Total invoices fetched: ${invoicesList.length}`);
-      
-      // DEBUG: Log first 3 invoices to see their structure
-      console.log('=== FIRST 3 INVOICES (for debugging) ===');
-      invoicesList.slice(0, 3).forEach((inv, index) => {
-        console.log(`Invoice ${index + 1}:`);
-        console.log('  Email:', inv.email);
-        console.log('  Custom Fields:', JSON.stringify(inv.custom_fields));
-        console.log('  Status:', inv.status);
-        console.log('  ---');
-      });
+      console.log(`Total invoices fetched across all pages: ${allInvoices.length}`);
 
-      if (!invoicesList || invoicesList.length === 0) {
+      if (allInvoices.length === 0) {
         await logCommandUsage(interaction, 'customer-spending', {
           error: 'No invoices found in shop'
         });
@@ -70,12 +83,11 @@ export default {
       console.log(`Searching for: "${normalizedSearch}"`);
 
       // Filter invoices by email or check if custom_fields contains Discord username
-      const customerInvoices = invoicesList.filter((invoice) => {
+      const customerInvoices = allInvoices.filter((invoice) => {
         // Check if email matches (trim and lowercase both sides)
         if (invoice.email) {
           const normalizedEmail = invoice.email.trim().toLowerCase();
           if (normalizedEmail === normalizedSearch) {
-            console.log(`✓ Email match found: ${invoice.email}`);
             return true;
           }
         }
@@ -88,7 +100,6 @@ export default {
               if (value && typeof value === 'string') {
                 const normalizedValue = value.trim().toLowerCase();
                 if (normalizedValue === normalizedSearch || normalizedValue.includes(normalizedSearch)) {
-                  console.log(`✓ Custom field match found - ${key}: ${value}`);
                   return true;
                 }
               }
@@ -108,26 +119,24 @@ export default {
           error: `No invoices found for search term: ${searchTerm}`
         });
 
-        // Provide helpful debug info
-        const allEmails = invoicesList
-          .map(inv => inv.email)
-          .filter((email, index, self) => email && self.indexOf(email) === index)
-          .slice(0, 5);
-        
-        const debugInfo = allEmails.length > 0 
-          ? `\n\nExample emails in system: ${allEmails.join(', ')}`
-          : '';
+        // Get unique emails for helpful error message
+        const uniqueEmails = [...new Set(allInvoices.map(inv => inv.email).filter(e => e))];
+        const sampleEmails = uniqueEmails.slice(0, 5).join(', ');
 
         await interaction.editReply({
-          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\nTip: Make sure to use the exact email or Discord username as it appears in the invoices.${debugInfo}\n\nCheck the bot console for more debugging information.`,
+          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\n**Searched ${allInvoices.length} total invoices**\n\nTip: Make sure to use the exact email as it appears in the invoices.\n\nSample emails in system: ${sampleEmails}`,
           ephemeral: true
         });
         return;
       }
 
       // Calculate totals by currency and overall stats
-      const completedInvoices = customerInvoices.filter((inv) => inv.completed_at || inv.status === 'COMPLETED');
-      const pendingInvoices = customerInvoices.filter((inv) => !inv.completed_at && inv.status !== 'COMPLETED');
+      const completedInvoices = customerInvoices.filter((inv) => 
+        inv.completed_at || inv.status === 'COMPLETED' || inv.status === 'completed'
+      );
+      const pendingInvoices = customerInvoices.filter((inv) => 
+        !inv.completed_at && inv.status !== 'COMPLETED' && inv.status !== 'completed'
+      );
 
       // Group by currency
       const totalsByCurrency = {};
@@ -197,7 +206,6 @@ export default {
       });
 
       console.error('Error fetching customer spending:', error);
-      console.error('Error details:', error);
       
       await interaction.editReply({
         content: `Failed to retrieve customer spending information.\n\nError: ${error.message}\n\nPlease check the bot console for more details.`,
