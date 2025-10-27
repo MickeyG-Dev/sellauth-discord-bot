@@ -29,7 +29,7 @@ export default {
       let allInvoices = [];
       let currentPage = 1;
       let hasMorePages = true;
-      const maxPages = 50; // Safety limit to prevent infinite loops
+      const maxPages = 500; // Increased limit - can handle up to 10,000 invoices (500 pages × 20 per page)
 
       console.log('Starting to fetch invoices...');
 
@@ -57,11 +57,13 @@ export default {
             allInvoices = allInvoices.concat(invoicesList);
             console.log(`Fetched page ${currentPage}: ${invoicesList.length} invoices (Total: ${allInvoices.length})`);
             
-            // Update the message with progress
-            await interaction.editReply({ 
-              content: `🔍 Fetching invoices... (Page ${currentPage} - ${allInvoices.length} invoices found)`, 
-              ephemeral: true 
-            });
+            // Update the message with progress every 5 pages or on first/last page
+            if (currentPage === 1 || currentPage % 5 === 0 || invoicesList.length < 20) {
+              await interaction.editReply({ 
+                content: `🔍 Fetching invoices... (Page ${currentPage} - ${allInvoices.length} invoices found)`, 
+                ephemeral: true 
+              }).catch(err => console.log('Failed to update progress:', err.message));
+            }
             
             // If we got less than a full page (usually 20), we're probably on the last page
             if (invoicesList.length < 20) {
@@ -74,6 +76,11 @@ export default {
           console.log(`Error fetching page ${currentPage}:`, error.message);
           hasMorePages = false;
         }
+      }
+
+      // Warn if we hit the maximum page limit
+      if (currentPage > maxPages) {
+        console.log(`WARNING: Reached maximum page limit of ${maxPages}. There may be more invoices.`);
       }
 
       // Update with search status
@@ -138,8 +145,12 @@ export default {
         const uniqueEmails = [...new Set(allInvoices.map(inv => inv.email).filter(e => e))];
         const sampleEmails = uniqueEmails.slice(0, 5).join(', ');
 
+        const warningText = currentPage > maxPages 
+          ? `\n\n⚠️ **Note**: Search stopped at ${maxPages} pages. There may be more invoices.` 
+          : '';
+
         await interaction.editReply({
-          content: `❌ No customer found with email or Discord username: \`${searchTerm}\`\n\n**Searched ${allInvoices.length} total invoices across ${currentPage - 1} pages**\n\nTip: Make sure to use the exact email as it appears in the invoices.\n\nSample emails in system: ${sampleEmails}`,
+          content: `❌ No customer found with email or Discord username: \`${searchTerm}\`\n\n**Searched ${allInvoices.length} total invoices across ${currentPage - 1} pages**${warningText}\n\nTip: Make sure to use the exact email as it appears in the invoices.\n\nSample emails in system: ${sampleEmails}`,
           ephemeral: true
         });
         return;
@@ -180,9 +191,13 @@ export default {
         result: `Customer ${customerEmail} - Total Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
       });
 
+      const warningText = currentPage > maxPages 
+        ? `\n⚠️ Stopped at ${maxPages} pages - there may be more invoices` 
+        : '';
+
       const embed = new EmbedBuilder()
         .setTitle('Customer Spending Report')
-        .setDescription(`Searched ${allInvoices.length} invoices across ${currentPage - 1} pages`)
+        .setDescription(`Searched ${allInvoices.length} invoices across ${currentPage - 1} pages${warningText}`)
         .setColor('#6571ff')
         .setTimestamp()
         .addFields([
