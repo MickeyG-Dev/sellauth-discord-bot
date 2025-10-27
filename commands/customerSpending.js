@@ -22,20 +22,42 @@ export default {
     await interaction.deferReply();
 
     try {
-      // Fetch all invoices
-      const invoices = await api.get(`shops/${shopId}/invoices`);
+      // Fetch invoices from API
+      const response = await api.get(`shops/${shopId}/invoices`);
+      
+      // Handle different response formats - check multiple possible structures
+      let invoicesList;
+      
+      if (Array.isArray(response)) {
+        invoicesList = response;
+      } else if (response?.data && Array.isArray(response.data)) {
+        invoicesList = response.data;
+      } else if (response?.invoices && Array.isArray(response.invoices)) {
+        invoicesList = response.invoices;
+      } else {
+        // If response is an object with invoice properties, try to extract them
+        console.log('Unexpected response format:', JSON.stringify(response).substring(0, 200));
+        
+        await interaction.editReply({
+          content: 'Unable to parse invoice data. The API response format is unexpected.\nPlease check the bot console for more details.',
+          ephemeral: true
+        });
+        return;
+      }
 
-      if (!invoices || invoices.length === 0) {
+      console.log(`Total invoices fetched: ${invoicesList.length}`);
+
+      if (!invoicesList || invoicesList.length === 0) {
         await logCommandUsage(interaction, 'customer-spending', {
           error: 'No invoices found in shop'
         });
 
-        await interaction.editReply({ content: 'No invoices found.', ephemeral: true });
+        await interaction.editReply({ content: 'No invoices found in the shop.', ephemeral: true });
         return;
       }
 
       // Filter invoices by email or check if custom_fields contains Discord username
-      const customerInvoices = invoices.filter((invoice) => {
+      const customerInvoices = invoicesList.filter((invoice) => {
         // Check if email matches
         if (invoice.email && invoice.email.toLowerCase() === searchTerm.toLowerCase()) {
           return true;
@@ -43,14 +65,20 @@ export default {
 
         // Check if custom fields contain the Discord username
         if (invoice.custom_fields) {
-          const customFieldsStr = JSON.stringify(invoice.custom_fields).toLowerCase();
-          if (customFieldsStr.includes(searchTerm.toLowerCase())) {
-            return true;
+          try {
+            const customFieldsStr = JSON.stringify(invoice.custom_fields).toLowerCase();
+            if (customFieldsStr.includes(searchTerm.toLowerCase())) {
+              return true;
+            }
+          } catch (e) {
+            console.error('Error parsing custom fields:', e);
           }
         }
 
         return false;
       });
+
+      console.log(`Found ${customerInvoices.length} invoices for search term: ${searchTerm}`);
 
       if (customerInvoices.length === 0) {
         await logCommandUsage(interaction, 'customer-spending', {
@@ -58,15 +86,15 @@ export default {
         });
 
         await interaction.editReply({
-          content: `No customer found with email or Discord username: ${searchTerm}`,
+          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\nTip: Make sure to use the exact email or Discord username as it appears in the invoices.`,
           ephemeral: true
         });
         return;
       }
 
       // Calculate totals by currency and overall stats
-      const completedInvoices = customerInvoices.filter((inv) => inv.completed_at);
-      const pendingInvoices = customerInvoices.filter((inv) => !inv.completed_at);
+      const completedInvoices = customerInvoices.filter((inv) => inv.completed_at || inv.status === 'COMPLETED');
+      const pendingInvoices = customerInvoices.filter((inv) => !inv.completed_at && inv.status !== 'COMPLETED');
 
       // Group by currency
       const totalsByCurrency = {};
@@ -75,19 +103,19 @@ export default {
         if (!totalsByCurrency[currency]) {
           totalsByCurrency[currency] = 0;
         }
-        totalsByCurrency[currency] += invoice.price || 0;
+        totalsByCurrency[currency] += parseFloat(invoice.price) || 0;
       });
 
       // Get customer email (use the first invoice's email)
-      const customerEmail = customerInvoices[0].email;
+      const customerEmail = customerInvoices[0].email || 'N/A';
 
       // Build currency breakdown string
       let currencyBreakdown = '';
-      for (const [currency, total] of Object.entries(totalsByCurrency)) {
-        currencyBreakdown += `${formatPrice(total, currency)}\n`;
-      }
-
-      if (!currencyBreakdown) {
+      if (Object.keys(totalsByCurrency).length > 0) {
+        for (const [currency, total] of Object.entries(totalsByCurrency)) {
+          currencyBreakdown += `${formatPrice(total, currency)}\n`;
+        }
+      } else {
         currencyBreakdown = 'No completed purchases';
       }
 
@@ -100,24 +128,28 @@ export default {
         .setColor('#6571ff')
         .setTimestamp()
         .addFields([
-          { name: 'Customer Email', value: customerEmail || 'N/A' },
+          { name: 'Customer Email', value: customerEmail },
           { name: 'Total Orders', value: customerInvoices.length.toString(), inline: true },
           { name: 'Completed Orders', value: completedInvoices.length.toString(), inline: true },
           { name: 'Pending Orders', value: pendingInvoices.length.toString(), inline: true },
-          { name: 'Total Spent', value: currencyBreakdown }
+          { name: 'Total Spent', value: currencyBreakdown.trim() || 'No purchases' }
         ]);
 
       // Add recent purchases (last 5 completed)
       const recentPurchases = completedInvoices
-        .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))
+        .sort((a, b) => {
+          const dateA = new Date(a.completed_at || a.created_at);
+          const dateB = new Date(b.completed_at || b.created_at);
+          return dateB - dateA;
+        })
         .slice(0, 5);
 
       if (recentPurchases.length > 0) {
         const recentPurchasesStr = recentPurchases
           .map((inv) => {
-            const date = new Date(inv.completed_at);
+            const date = new Date(inv.completed_at || inv.created_at);
             const product = inv.product?.name || 'Unknown Product';
-            const price = formatPrice(inv.price, inv.currency);
+            const price = formatPrice(inv.price, inv.currency || 'USD');
             return `• ${product} - ${price} (${date.toLocaleDateString()})`;
           })
           .join('\n');
@@ -132,8 +164,10 @@ export default {
       });
 
       console.error('Error fetching customer spending:', error);
+      console.error('Error details:', error);
+      
       await interaction.editReply({
-        content: 'Failed to retrieve customer spending information.',
+        content: `Failed to retrieve customer spending information.\n\nError: ${error.message}\n\nPlease check the bot console for more details.`,
         ephemeral: true
       });
     }
