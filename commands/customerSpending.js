@@ -189,7 +189,27 @@ export default {
           { name: 'Total Spent', value: currencyBreakdown.trim() || 'No purchases' }
         ]);
 
-      // Get recent purchases and try to fetch details
+      // Helper function to extract product info from invoice
+      const getProductInfo = (invoice) => {
+        // Check if items array exists and has products
+        if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+          const productNames = invoice.items.map(item => {
+            const productName = item.product?.name || 'Unknown Product';
+            const variantName = item.variant?.name;
+            return variantName ? `${productName} (${variantName})` : productName;
+          });
+          return productNames.join(', ');
+        }
+        
+        // Fallback to legacy product field
+        if (invoice.product?.name) {
+          return invoice.product.name;
+        }
+        
+        return 'Unknown Product';
+      };
+
+      // Get recent purchases
       const recentInvoices = completedInvoices
         .sort((a, b) => {
           const dateA = new Date(a.completed_at || a.created_at);
@@ -198,79 +218,20 @@ export default {
         })
         .slice(0, 5);
 
-      await interaction.editReply({ 
-        content: `🔍 Loading product details...`, 
-        ephemeral: true 
-      }).catch(() => {});
-
       if (recentInvoices.length > 0) {
-        const recentPurchasesStr = [];
-        
-        // Debug: Log the structure of the first invoice
-        if (recentInvoices[0]) {
-          console.log('First invoice structure:', JSON.stringify({
-            id: recentInvoices[0].id,
-            unique_id: recentInvoices[0].unique_id,
-            invoice_id: recentInvoices[0].invoice_id,
-            product: recentInvoices[0].product,
-            product_id: recentInvoices[0].product_id,
-            product_name: recentInvoices[0].product_name
-          }));
-        }
-        
-        for (const inv of recentInvoices) {
-          try {
-            // Try multiple methods to get the invoice ID
-            let invoiceId = null;
-            
-            // Method 1: Check if unique_id exists and extract number
-            if (inv.unique_id && typeof inv.unique_id === 'string' && inv.unique_id.includes('-')) {
-              invoiceId = inv.unique_id.split('-')[1];
-            }
-            // Method 2: Use id directly
-            else if (inv.id) {
-              invoiceId = inv.id;
-            }
-            // Method 3: Use invoice_id if it exists
-            else if (inv.invoice_id) {
-              invoiceId = inv.invoice_id;
-            }
-            
-            console.log(`Attempting to fetch invoice with ID: ${invoiceId}`);
-            
-            if (!invoiceId) {
-              throw new Error('No valid invoice ID found');
-            }
-            
-            // Fetch full invoice details
-            const fullInvoice = await api.get(`shops/${shopId}/invoices/${invoiceId}`);
-            
-            const date = new Date(fullInvoice.completed_at || fullInvoice.created_at);
-            const product = fullInvoice.product?.name || fullInvoice.product?.title || fullInvoice.product_name || 'Unknown Product';
-            const price = formatPrice(fullInvoice.price, fullInvoice.currency || 'USD');
-            
-            recentPurchasesStr.push(`• ${product} - ${price} (${date.toLocaleDateString()})`);
-            console.log(`Successfully fetched product: ${product}`);
-          } catch (error) {
-            console.error(`Error fetching invoice details for invoice:`, error.message);
-            console.error('Invoice object:', JSON.stringify(inv));
-            
-            // Fallback: Use whatever product info is available in the list
-            const date = new Date(inv.completed_at || inv.created_at);
-            const product = inv.product?.name || inv.product?.title || inv.product_name || 'Product unavailable';
-            const price = formatPrice(inv.price, inv.currency || 'USD');
-            recentPurchasesStr.push(`• ${product} - ${price} (${date.toLocaleDateString()})`);
-          }
-        }
+        const recentPurchasesStr = recentInvoices.map((inv) => {
+          const date = new Date(inv.completed_at || inv.created_at);
+          const product = getProductInfo(inv);
+          const price = formatPrice(inv.price, inv.currency || 'USD');
+          return `• ${product} - ${price} (${date.toLocaleDateString()})`;
+        });
 
-        if (recentPurchasesStr.length > 0) {
-          embed.addFields({ name: 'Recent Purchases', value: recentPurchasesStr.join('\n') });
-        }
+        embed.addFields({ name: 'Recent Purchases', value: recentPurchasesStr.join('\n') });
 
         // Build product list for logging
-        const productsSummary = recentPurchasesStr
+        const productsSummary = recentInvoices
           .slice(0, 3)
-          .map(str => str.split(' - ')[0].replace('• ', ''))
+          .map(inv => getProductInfo(inv))
           .join(', ');
 
         await logCommandUsage(interaction, 'customer-spending', {
