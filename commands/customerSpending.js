@@ -29,13 +29,12 @@ export default {
       let allInvoices = [];
       let currentPage = 1;
       let hasMorePages = true;
-      const maxPages = 500; // Increased limit - can handle up to 10,000 invoices (500 pages × 20 per page)
+      const maxPages = 500;
 
       console.log('Starting to fetch invoices...');
 
       while (hasMorePages && currentPage <= maxPages) {
         try {
-          // Try fetching with page parameter
           const response = await api.get(`shops/${shopId}/invoices?page=${currentPage}`);
           
           let invoicesList;
@@ -57,7 +56,6 @@ export default {
             allInvoices = allInvoices.concat(invoicesList);
             console.log(`Fetched page ${currentPage}: ${invoicesList.length} invoices (Total: ${allInvoices.length})`);
             
-            // Update the message with progress every 5 pages or on first/last page
             if (currentPage === 1 || currentPage % 5 === 0 || invoicesList.length < 20) {
               await interaction.editReply({ 
                 content: `🔍 Fetching invoices... (Page ${currentPage} - ${allInvoices.length} invoices found)`, 
@@ -65,7 +63,6 @@ export default {
               }).catch(err => console.log('Failed to update progress:', err.message));
             }
             
-            // If we got less than a full page (usually 20), we're probably on the last page
             if (invoicesList.length < 20) {
               hasMorePages = false;
             } else {
@@ -78,12 +75,10 @@ export default {
         }
       }
 
-      // Warn if we hit the maximum page limit
       if (currentPage > maxPages) {
         console.log(`WARNING: Reached maximum page limit of ${maxPages}. There may be more invoices.`);
       }
 
-      // Update with search status
       await interaction.editReply({ 
         content: `🔍 Searching ${allInvoices.length} invoices for: \`${searchTerm}\`...`, 
         ephemeral: true 
@@ -100,13 +95,10 @@ export default {
         return;
       }
 
-      // Normalize search term (trim and lowercase)
       const normalizedSearch = searchTerm.trim().toLowerCase();
       console.log(`Searching for: "${normalizedSearch}"`);
 
-      // Filter invoices by email or check if custom_fields contains Discord username
       const customerInvoices = allInvoices.filter((invoice) => {
-        // Check if email matches (trim and lowercase both sides)
         if (invoice.email) {
           const normalizedEmail = invoice.email.trim().toLowerCase();
           if (normalizedEmail === normalizedSearch) {
@@ -114,10 +106,8 @@ export default {
           }
         }
 
-        // Check if custom fields contain the Discord username
         if (invoice.custom_fields) {
           try {
-            // Check each custom field individually
             for (const [key, value] of Object.entries(invoice.custom_fields)) {
               if (value && typeof value === 'string') {
                 const normalizedValue = value.trim().toLowerCase();
@@ -141,7 +131,6 @@ export default {
           error: `No invoices found for search term: ${searchTerm}`
         });
 
-        // Get unique emails for helpful error message
         const uniqueEmails = [...new Set(allInvoices.map(inv => inv.email).filter(e => e))];
         const sampleEmails = uniqueEmails.slice(0, 5).join(', ');
 
@@ -156,7 +145,6 @@ export default {
         return;
       }
 
-      // Calculate totals by currency and overall stats
       const completedInvoices = customerInvoices.filter((inv) => 
         inv.completed_at || inv.status === 'COMPLETED' || inv.status === 'completed'
       );
@@ -164,7 +152,6 @@ export default {
         !inv.completed_at && inv.status !== 'COMPLETED' && inv.status !== 'completed'
       );
 
-      // Group by currency
       const totalsByCurrency = {};
       completedInvoices.forEach((invoice) => {
         const currency = invoice.currency || 'USD';
@@ -174,10 +161,8 @@ export default {
         totalsByCurrency[currency] += parseFloat(invoice.price) || 0;
       });
 
-      // Get customer email (use the first invoice's email)
       const customerEmail = customerInvoices[0].email || 'N/A';
 
-      // Build currency breakdown string
       let currencyBreakdown = '';
       if (Object.keys(totalsByCurrency).length > 0) {
         for (const [currency, total] of Object.entries(totalsByCurrency)) {
@@ -186,19 +171,6 @@ export default {
       } else {
         currencyBreakdown = 'No completed purchases';
       }
-
-      // Build product list for logging
-      const productsSummary = completedInvoices
-        .slice(0, 3)
-        .map(inv => {
-          const productName = inv.product?.name || inv.product?.title || inv.product_name || 'Unknown';
-          return productName;
-        })
-        .join(', ');
-
-      await logCommandUsage(interaction, 'customer-spending', {
-        result: `Customer ${customerEmail} - Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Products: ${productsSummary}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
-      });
 
       const warningText = currentPage > maxPages 
         ? `\n⚠️ Stopped at ${maxPages} pages - there may be more invoices` 
@@ -217,8 +189,8 @@ export default {
           { name: 'Total Spent', value: currencyBreakdown.trim() || 'No purchases' }
         ]);
 
-      // Add recent purchases (last 5 completed)
-      const recentPurchases = completedInvoices
+      // Fetch detailed invoice data for recent purchases to get product names
+      const recentInvoiceIds = completedInvoices
         .sort((a, b) => {
           const dateA = new Date(a.completed_at || a.created_at);
           const dateB = new Date(b.completed_at || b.created_at);
@@ -226,18 +198,56 @@ export default {
         })
         .slice(0, 5);
 
-      if (recentPurchases.length > 0) {
-        const recentPurchasesStr = recentPurchases
-          .map((inv) => {
-            const date = new Date(inv.completed_at || inv.created_at);
-            // Try multiple ways to get product name
-            const product = inv.product?.name || inv.product?.title || inv.product_name || 'Product ID: ' + (inv.product_id || 'N/A');
-            const price = formatPrice(inv.price, inv.currency || 'USD');
-            return `• ${product} - ${price} (${date.toLocaleDateString()})`;
-          })
-          .join('\n');
+      await interaction.editReply({ 
+        content: `🔍 Loading product details...`, 
+        ephemeral: true 
+      }).catch(() => {});
 
-        embed.addFields({ name: 'Recent Purchases', value: recentPurchasesStr });
+      if (recentInvoiceIds.length > 0) {
+        const recentPurchasesStr = [];
+        
+        for (const inv of recentInvoiceIds) {
+          try {
+            // Extract invoice ID - handle both formats
+            let invoiceId = inv.id;
+            if (inv.unique_id && inv.unique_id.includes('-')) {
+              invoiceId = Number(inv.unique_id.split('-')[1]);
+            }
+            
+            // Fetch full invoice details to get product info
+            const fullInvoice = await api.get(`shops/${shopId}/invoices/${invoiceId}`);
+            
+            const date = new Date(fullInvoice.completed_at || fullInvoice.created_at);
+            const product = fullInvoice.product?.name || fullInvoice.product?.title || 'Unknown Product';
+            const price = formatPrice(fullInvoice.price, fullInvoice.currency || 'USD');
+            
+            recentPurchasesStr.push(`• ${product} - ${price} (${date.toLocaleDateString()})`);
+          } catch (error) {
+            console.error('Error fetching invoice details:', error);
+            // Fallback to basic info if fetch fails
+            const date = new Date(inv.completed_at || inv.created_at);
+            const price = formatPrice(inv.price, inv.currency || 'USD');
+            recentPurchasesStr.push(`• [Details unavailable] - ${price} (${date.toLocaleDateString()})`);
+          }
+        }
+
+        if (recentPurchasesStr.length > 0) {
+          embed.addFields({ name: 'Recent Purchases', value: recentPurchasesStr.join('\n') });
+        }
+
+        // Build product list for logging (first 3)
+        const productsSummary = recentPurchasesStr
+          .slice(0, 3)
+          .map(str => str.split(' - ')[0].replace('• ', ''))
+          .join(', ');
+
+        await logCommandUsage(interaction, 'customer-spending', {
+          result: `Customer ${customerEmail} - Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Products: ${productsSummary}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
+        });
+      } else {
+        await logCommandUsage(interaction, 'customer-spending', {
+          result: `Customer ${customerEmail} - Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
+        });
       }
 
       await interaction.editReply({ embeds: [embed] });
