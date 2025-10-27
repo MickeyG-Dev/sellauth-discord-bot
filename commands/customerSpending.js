@@ -187,8 +187,17 @@ export default {
         currencyBreakdown = 'No completed purchases';
       }
 
+      // Build product list for logging
+      const productsSummary = completedInvoices
+        .slice(0, 3)
+        .map(inv => {
+          const productName = inv.product?.name || inv.product?.title || inv.product_name || 'Unknown';
+          return productName;
+        })
+        .join(', ');
+
       await logCommandUsage(interaction, 'customer-spending', {
-        result: `Customer ${customerEmail} - Total Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
+        result: `Customer ${customerEmail} - Orders: ${customerInvoices.length}, Completed: ${completedInvoices.length}, Products: ${productsSummary}, Spending: ${currencyBreakdown.replace(/\n/g, ', ')}`
       });
 
       const warningText = currentPage > maxPages 
@@ -221,7 +230,8 @@ export default {
         const recentPurchasesStr = recentPurchases
           .map((inv) => {
             const date = new Date(inv.completed_at || inv.created_at);
-            const product = inv.product?.name || 'Unknown Product';
+            // Try multiple ways to get product name
+            const product = inv.product?.name || inv.product?.title || inv.product_name || 'Product ID: ' + (inv.product_id || 'N/A');
             const price = formatPrice(inv.price, inv.currency || 'USD');
             return `• ${product} - ${price} (${date.toLocaleDateString()})`;
           })
