@@ -22,6 +22,9 @@ export default {
     await interaction.deferReply();
 
     try {
+      // Initial status message
+      await interaction.editReply({ content: '🔍 Fetching invoices... (Page 1)', ephemeral: true });
+
       // Fetch ALL invoices with pagination
       let allInvoices = [];
       let currentPage = 1;
@@ -54,6 +57,12 @@ export default {
             allInvoices = allInvoices.concat(invoicesList);
             console.log(`Fetched page ${currentPage}: ${invoicesList.length} invoices (Total: ${allInvoices.length})`);
             
+            // Update the message with progress
+            await interaction.editReply({ 
+              content: `🔍 Fetching invoices... (Page ${currentPage} - ${allInvoices.length} invoices found)`, 
+              ephemeral: true 
+            });
+            
             // If we got less than a full page (usually 20), we're probably on the last page
             if (invoicesList.length < 20) {
               hasMorePages = false;
@@ -66,6 +75,12 @@ export default {
           hasMorePages = false;
         }
       }
+
+      // Update with search status
+      await interaction.editReply({ 
+        content: `🔍 Searching ${allInvoices.length} invoices for: \`${searchTerm}\`...`, 
+        ephemeral: true 
+      });
 
       console.log(`Total invoices fetched across all pages: ${allInvoices.length}`);
 
@@ -124,7 +139,7 @@ export default {
         const sampleEmails = uniqueEmails.slice(0, 5).join(', ');
 
         await interaction.editReply({
-          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\n**Searched ${allInvoices.length} total invoices**\n\nTip: Make sure to use the exact email as it appears in the invoices.\n\nSample emails in system: ${sampleEmails}`,
+          content: `❌ No customer found with email or Discord username: \`${searchTerm}\`\n\n**Searched ${allInvoices.length} total invoices across ${currentPage - 1} pages**\n\nTip: Make sure to use the exact email as it appears in the invoices.\n\nSample emails in system: ${sampleEmails}`,
           ephemeral: true
         });
         return;
@@ -167,6 +182,7 @@ export default {
 
       const embed = new EmbedBuilder()
         .setTitle('Customer Spending Report')
+        .setDescription(`Searched ${allInvoices.length} invoices across ${currentPage - 1} pages`)
         .setColor('#6571ff')
         .setTimestamp()
         .addFields([
@@ -208,7 +224,7 @@ export default {
       console.error('Error fetching customer spending:', error);
       
       await interaction.editReply({
-        content: `Failed to retrieve customer spending information.\n\nError: ${error.message}\n\nPlease check the bot console for more details.`,
+        content: `❌ Failed to retrieve customer spending information.\n\nError: ${error.message}\n\nPlease check the bot console for more details.`,
         ephemeral: true
       });
     }
