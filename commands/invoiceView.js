@@ -49,6 +49,38 @@ const formatGatewayInfo = (invoice) => {
   }
 };
 
+// Helper function to get product names from items array
+const formatProducts = (invoice) => {
+  // Check if items array exists and has products
+  if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+    const products = invoice.items.map(item => item.product?.name || 'Unknown Product');
+    return products.join(', ');
+  }
+  
+  // Fallback to legacy product field
+  if (invoice.product?.name) {
+    return invoice.product.name;
+  }
+  
+  return 'N/A';
+};
+
+// Helper function to get variant names from items array
+const formatVariants = (invoice) => {
+  // Check if items array exists and has variants
+  if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+    const variants = invoice.items.map(item => item.variant?.name || 'N/A');
+    return variants.join(', ');
+  }
+  
+  // Fallback to legacy variant field
+  if (invoice.variant?.name) {
+    return invoice.variant.name;
+  }
+  
+  return 'N/A';
+};
+
 export default {
   data: new SlashCommandBuilder()
     .setName('invoice-view')
@@ -79,8 +111,11 @@ export default {
         return;
       }
 
+      const productNames = formatProducts(invoice);
+      const variantNames = formatVariants(invoice);
+
       await logCommandUsage(interaction, 'invoice-view', {
-        result: `Viewed invoice ${id} - Status: ${invoice.status}, Product: ${invoice.product?.name || 'N/A'}`
+        result: `Viewed invoice ${id} - Status: ${invoice.status}, Product: ${productNames}`
       });
 
       const embed = new EmbedBuilder()
@@ -90,8 +125,8 @@ export default {
         .addFields([
           { name: 'ID', value: invoice.unique_id },
           { name: 'Status', value: invoice.status.replace(/_/g, ' ') },
-          { name: 'Product', value: invoice.product?.name || 'N/A' },
-          { name: 'Variant', value: invoice.variant?.name || 'N/A' },
+          { name: 'Product', value: productNames },
+          { name: 'Variant', value: variantNames },
           { name: 'Price', value: formatPrice(invoice.price, invoice.currency) },
           { name: 'Coupon', value: formatCoupon(invoice.coupon) },
           { name: 'Email', value: invoice.email },
