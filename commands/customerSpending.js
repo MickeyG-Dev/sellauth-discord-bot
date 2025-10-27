@@ -25,7 +25,7 @@ export default {
       // Fetch invoices from API
       const response = await api.get(`shops/${shopId}/invoices`);
       
-      // Handle different response formats - check multiple possible structures
+      // Handle different response formats
       let invoicesList;
       
       if (Array.isArray(response)) {
@@ -35,8 +35,7 @@ export default {
       } else if (response?.invoices && Array.isArray(response.invoices)) {
         invoicesList = response.invoices;
       } else {
-        // If response is an object with invoice properties, try to extract them
-        console.log('Unexpected response format:', JSON.stringify(response).substring(0, 200));
+        console.log('Unexpected response format:', JSON.stringify(response).substring(0, 500));
         
         await interaction.editReply({
           content: 'Unable to parse invoice data. The API response format is unexpected.\nPlease check the bot console for more details.',
@@ -46,6 +45,16 @@ export default {
       }
 
       console.log(`Total invoices fetched: ${invoicesList.length}`);
+      
+      // DEBUG: Log first 3 invoices to see their structure
+      console.log('=== FIRST 3 INVOICES (for debugging) ===');
+      invoicesList.slice(0, 3).forEach((inv, index) => {
+        console.log(`Invoice ${index + 1}:`);
+        console.log('  Email:', inv.email);
+        console.log('  Custom Fields:', JSON.stringify(inv.custom_fields));
+        console.log('  Status:', inv.status);
+        console.log('  ---');
+      });
 
       if (!invoicesList || invoicesList.length === 0) {
         await logCommandUsage(interaction, 'customer-spending', {
@@ -56,19 +65,33 @@ export default {
         return;
       }
 
+      // Normalize search term (trim and lowercase)
+      const normalizedSearch = searchTerm.trim().toLowerCase();
+      console.log(`Searching for: "${normalizedSearch}"`);
+
       // Filter invoices by email or check if custom_fields contains Discord username
       const customerInvoices = invoicesList.filter((invoice) => {
-        // Check if email matches
-        if (invoice.email && invoice.email.toLowerCase() === searchTerm.toLowerCase()) {
-          return true;
+        // Check if email matches (trim and lowercase both sides)
+        if (invoice.email) {
+          const normalizedEmail = invoice.email.trim().toLowerCase();
+          if (normalizedEmail === normalizedSearch) {
+            console.log(`✓ Email match found: ${invoice.email}`);
+            return true;
+          }
         }
 
         // Check if custom fields contain the Discord username
         if (invoice.custom_fields) {
           try {
-            const customFieldsStr = JSON.stringify(invoice.custom_fields).toLowerCase();
-            if (customFieldsStr.includes(searchTerm.toLowerCase())) {
-              return true;
+            // Check each custom field individually
+            for (const [key, value] of Object.entries(invoice.custom_fields)) {
+              if (value && typeof value === 'string') {
+                const normalizedValue = value.trim().toLowerCase();
+                if (normalizedValue === normalizedSearch || normalizedValue.includes(normalizedSearch)) {
+                  console.log(`✓ Custom field match found - ${key}: ${value}`);
+                  return true;
+                }
+              }
             }
           } catch (e) {
             console.error('Error parsing custom fields:', e);
@@ -78,15 +101,25 @@ export default {
         return false;
       });
 
-      console.log(`Found ${customerInvoices.length} invoices for search term: ${searchTerm}`);
+      console.log(`Found ${customerInvoices.length} invoices for search term: "${searchTerm}"`);
 
       if (customerInvoices.length === 0) {
         await logCommandUsage(interaction, 'customer-spending', {
           error: `No invoices found for search term: ${searchTerm}`
         });
 
+        // Provide helpful debug info
+        const allEmails = invoicesList
+          .map(inv => inv.email)
+          .filter((email, index, self) => email && self.indexOf(email) === index)
+          .slice(0, 5);
+        
+        const debugInfo = allEmails.length > 0 
+          ? `\n\nExample emails in system: ${allEmails.join(', ')}`
+          : '';
+
         await interaction.editReply({
-          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\nTip: Make sure to use the exact email or Discord username as it appears in the invoices.`,
+          content: `No customer found with email or Discord username: \`${searchTerm}\`\n\nTip: Make sure to use the exact email or Discord username as it appears in the invoices.${debugInfo}\n\nCheck the bot console for more debugging information.`,
           ephemeral: true
         });
         return;
